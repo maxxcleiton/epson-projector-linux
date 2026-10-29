@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Epson Projeção Linux
+GenericName=Projetor de Rede
+Comment=Conexão e Espelhamento Nativo para Projetores Epson
+Exec=/usr/bin/epson-projector
+Icon=epson-projector
+Terminal=false
+Categories=Network;AudioVideo;Utility;
+StartupNotify=true
