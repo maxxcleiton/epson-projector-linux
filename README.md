@@ -15,6 +15,10 @@ O software oficial da Epson (*EasyMP Network Projection* / *iProjection*) não p
 
 Este projeto reimplementa de forma nativa e enxuta os protocolos de comunicação da Epson (**ESC/VP.net** e **EasyMP Network Projection**), permitindo que qualquer usuário Linux controle e espelhe sua tela no projetor através da rede local (Wi-Fi ou Ethernet) com alto desempenho, baixa latência e consumo mínimo de CPU.
 
+### 🔬 Engenharia Reversa (REA)
+
+Como a Epson não disponibiliza documentação pública ou especificações abertas sobre o protocolo de transporte de vídeo EasyMP e seus cabeçalhos binários, esta solução foi concebida por meio de **Engenharia Reversa (Reverse Engineering / REA)**. Através da análise e dissecação do tráfego de pacotes de rede TCP/IP e inspeção das rotinas de comunicação cliente-projetor, foi possível decodificar os frames de controle `EEMP0100` (porta 3620) e o fluxo segmentado de quadros JPEG (porta 3621), resultando em uma implementação 100% livre de bibliotecas proprietárias.
+
 ---
 
 ## ✨ Funcionalidades
@@ -84,35 +88,48 @@ Muitos projetores Epson utilizam módulos de rede sem fio USB (como os dongles *
 
 ## 🚀 Instalação
 
-### Opção 1: Pacote `.deb` (Recomendado para Ubuntu, Debian, Pop!_OS, Mint)
+### Opção 1: Compilar e Gerar o Pacote `.deb` (Recomendado)
 
-Você pode compilar e instalar o pacote Debian em poucos segundos:
+O repositório já inclui um script completo de automação de build (`build_deb.sh`) para gerar pacotes `.deb` compatíveis com Debian, Ubuntu, Pop!_OS, Linux Mint e derivados.
 
 ```bash
 # 1. Clone o repositório
 git clone https://github.com/seu-usuario/epson-projector-linux.git
 cd epson-projector-linux
 
-# 2. Gere o pacote .deb
+# 2. Torne o script executável e gere o pacote
+chmod +x build_deb.sh
 ./build_deb.sh
 
-# 3. Instale o pacote gerado
+# 3. Instale o pacote gerado no sistema
 sudo dpkg -i epson-projector-linux_1.3.5_all.deb
 sudo apt-get install -f
 ```
 
-O aplicativo será instalado em `/usr/share/epson-projector`, com executável no `/usr/bin/epson-projector` e atalho integrado ao menu do sistema e à Área de Trabalho.
+#### 📦 O que o processo de compilação/build faz por baixo dos panos?
+- Cria a estrutura hierárquica FHS do Linux em `build_pkg/`:
+  - `/usr/share/epson-projector/src/`: Módulos Python do aplicativo.
+  - `/usr/share/epson-projector/assets/`: Ícones e recursos visuais.
+  - `/usr/bin/epson-projector`: Lançador executável no PATH do sistema.
+  - `/usr/share/applications/epson-projector.desktop`: Atalho de integração com o menu de aplicativos.
+  - `/usr/share/icons/hicolor/64x64/apps/`: Ícone oficial do sistema.
+- Injeta o script de pós-instalação (`postinst`) que distribui o atalho automaticamente na **Área de Trabalho** de todos os usuários cadastrados e registra as permissões no sistema.
+- Empacota tudo utilizando `dpkg-deb --root-owner-group --build`.
 
-### Opção 2: Execução Direta a Partir do Código-Fonte
+### Opção 2: Executar Diretamente do Código-Fonte (Sem Instalação)
 
-Instale as dependências necessárias no seu sistema:
+Se preferir rodar sem instalar no sistema operacional:
 
 ```bash
-# Debian / Ubuntu / Pop!_OS / Linux Mint:
+# 1. Instale as dependências do sistema
 sudo apt update
 sudo apt install -y python3 python3-gi gir1.2-gtk-3.0 gir1.2-gdkpixbuf-2.0 python3-pil libx11-6 libxfixes3
 
-# Execute diretamente:
+# 2. Verifique a sintaxe dos arquivos Python (opcional)
+python3 -m py_compile src/*.py
+
+# 3. Execute o script de inicialização
+chmod +x run.sh
 ./run.sh
 ```
 
