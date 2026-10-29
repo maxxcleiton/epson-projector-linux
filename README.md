@@ -32,6 +32,18 @@ Este projeto reimplementa de forma nativa e enxuta os protocolos de comunicaçã
 
 ---
 
+## ⚠️ Compatibilidade e Modelos Testados
+
+> [!NOTE]
+> **Aviso sobre modelos e validação:**
+> Este software foi concebido, desenvolvido e testado com o projetor Epson corporativo 3LCD (padrão XGA 1024x768 com módulo de rede sem fio EasyMP / ESC/VP.net) disponível em nosso ambiente.
+> 
+> Até o momento, **ele não foi testado em outros modelos ou séries da Epson** (como modelos WXGA 1280x800, Full HD 1080p ou projetores laser/home cinema).
+> 
+> Como a Epson padroniza os protocolos **EasyMP** (portas 3620/3621) e **ESC/VP.net** (porta 3629) na maioria de seus projetores de rede, a expectativa é que funcione na maioria dos modelos compatíveis. Se você testar em um modelo diferente, **seu feedback é muito bem-vindo**! Sinta-se à vontade para abrir uma *Issue* relatando seu modelo e resultados.
+
+---
+
 ## 🏗️ Arquitetura dos Protocolos
 
 O aplicativo comunica-se diretamente com o firmware do projetor através de três canais TCP:
