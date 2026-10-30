@@ -259,8 +259,8 @@ class MainWindow(Gtk.Window):
 
         self.listbox = Gtk.ListBox()
         self.listbox.set_selection_mode(Gtk.SelectionMode.SINGLE)
+        self.listbox.set_activate_on_single_click(False)
         self.listbox.connect("row-selected", self.on_row_selected)
-        self.listbox.connect("row-activated", lambda lb, row: self.on_edit_projector_dialog(None))
         scroll.add(self.listbox)
 
         # Seletor de Monitor
