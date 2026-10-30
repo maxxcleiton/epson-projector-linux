@@ -174,6 +174,10 @@ You can add projectors through the graphical interface (`+ Adicionar`) or by edi
 
 ## 📜 Version History (Changelog)
 
+### **v1.3.6**
+- **Seamless "Starting Up..." Power Transition**: When powering on a projector from Standby, the interface immediately reports "Starting Up... (Please wait)" with a vibrant status indicator, preventing the transient hardware network reboot from momentarily flashing a false "Disconnected" error before lamp warmup.
+- **Projector Profile Editing & Removal**: Added an Edit Projector button (and double-click shortcut on the list) allowing users to rename projectors or update IP addresses on the fly, as well as a Remove button to delete obsolete projectors from the configuration.
+
 ### **v1.3.5**
 - **Critical Mouse Cursor Fix (64-bit LP64)**: Fixed memory alignment calculation when reading pixel data from `libXfixes`. In x86_64 architecture, cursor pixels use `unsigned long` (8 bytes per pixel), while color data resides in 32-bit integers. Adjusting the pixel stride eliminated the jagged/comb artifact, delivering a crisp, perfectly anti-aliased cursor arrow.
 

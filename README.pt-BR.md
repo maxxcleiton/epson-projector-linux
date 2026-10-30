@@ -171,6 +171,10 @@ Você pode adicionar projetores tanto pela interface gráfica (clicando no botã
 
 ## 📜 Histórico de Versões (Changelog)
 
+### **v1.3.6**
+- **Status Transitório "Iniciando... (Aguarde)"**: Ao ligar o projetor pelo aplicativo, a interface exibe imediatamente o status "Iniciando..." com indicador azul vibrante. Isso evita que o reinício temporário da placa de rede interna do projetor durante a ignição da lâmpada mostre falsamente "Desconectado" antes do aquecimento.
+- **Edição e Remoção de Projetores**: Adicionado botão de edição (e atalho por duplo-clique na lista) para alterar o nome e IP dos projetores cadastrados diretamente pela interface gráfica, além de botão para exclusão de projetores obsoletos.
+
 ### **v1.3.5**
 - **Correção Crítica no Cursor do Mouse (64-bit LP64)**: Corrigido o bug de alinhamento de memória na extração de pixels da `libXfixes`. Em arquiteturas x86_64, os pixels do cursor utilizam `unsigned long` (8 bytes), enquanto os dados de cor ocupam 4 bytes. O ajuste de stride eliminou o padrão serrilhado/pente, gerando uma seta perfeitamente lisa e nítida.
 

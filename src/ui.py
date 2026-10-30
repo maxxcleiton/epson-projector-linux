@@ -15,7 +15,14 @@ gi.require_version("Gdk", "3.0")
 gi.require_version("GLib", "2.0")
 from gi.repository import Gtk, Gdk, GLib, Pango
 
-from .config import get_projectors, add_or_update_projector, load_config, save_config
+from .config import (
+    get_projectors,
+    add_or_update_projector,
+    update_projector_details,
+    remove_projector,
+    load_config,
+    save_config,
+)
 from .discovery import update_all_projector_statuses, scan_network_for_projectors
 from .capture import ScreenCapturer
 from .streamer import ProjectorSession
@@ -166,6 +173,7 @@ class MainWindow(Gtk.Window):
         self.projectors_data = []
         self.selected_proj_index = -1
         self._refreshing = False
+        self._transient_power_states = {}  # Guarda estados temporários para transição suave (STARTING / COOLDOWN)
 
         # Aplica estilo CSS para garantir contraste perfeito e seleção elegante em tom grafite
         css_provider = Gtk.CssProvider()
@@ -209,6 +217,20 @@ class MainWindow(Gtk.Window):
         btn_add.connect("clicked", self.on_add_projector_dialog)
         header.pack_start(btn_add)
 
+        # Botão editar projetor (Nome / IP)
+        self.btn_edit = Gtk.Button.new_from_icon_name("document-edit-symbolic", Gtk.IconSize.BUTTON)
+        self.btn_edit.set_tooltip_text("Editar nome e IP do projetor selecionado")
+        self.btn_edit.set_sensitive(False)
+        self.btn_edit.connect("clicked", self.on_edit_projector_dialog)
+        header.pack_start(self.btn_edit)
+
+        # Botão remover projetor
+        self.btn_remove = Gtk.Button.new_from_icon_name("list-remove-symbolic", Gtk.IconSize.BUTTON)
+        self.btn_remove.set_tooltip_text("Remover projetor selecionado da lista")
+        self.btn_remove.set_sensitive(False)
+        self.btn_remove.connect("clicked", self.on_remove_projector_dialog)
+        header.pack_start(self.btn_remove)
+
         # Botão de informações importantes (Standby / Dicas)
         btn_info = Gtk.Button.new_from_icon_name("dialog-information-symbolic", Gtk.IconSize.BUTTON)
         btn_info.set_tooltip_text("Dicas importantes sobre Standby e Modo de Comunicação")
@@ -238,6 +260,7 @@ class MainWindow(Gtk.Window):
         self.listbox = Gtk.ListBox()
         self.listbox.set_selection_mode(Gtk.SelectionMode.SINGLE)
         self.listbox.connect("row-selected", self.on_row_selected)
+        self.listbox.connect("row-activated", lambda lb, row: self.on_edit_projector_dialog(None))
         scroll.add(self.listbox)
 
         # Seletor de Monitor
@@ -321,6 +344,25 @@ class MainWindow(Gtk.Window):
             try:
                 raw_projs = get_projectors()
                 updated = update_all_projector_statuses(raw_projs)
+                now = time.time()
+                for item in updated:
+                    ip = item.get("ip")
+                    trans = self._transient_power_states.get(ip)
+                    if trans:
+                        if now < trans["expires"]:
+                            current_probed_pwr = item.get("power")
+                            if trans["state"] == "STARTING":
+                                if current_probed_pwr in ("WARMUP", "ON", "BUSY"):
+                                    self._transient_power_states.pop(ip, None)
+                                else:
+                                    item["power"] = "STARTING"
+                            elif trans["state"] == "COOLDOWN":
+                                if current_probed_pwr in ("STANDBY", "OFFLINE"):
+                                    self._transient_power_states.pop(ip, None)
+                                else:
+                                    item["power"] = "COOLDOWN"
+                        else:
+                            self._transient_power_states.pop(ip, None)
                 GLib.idle_add(self.populate_projector_list, updated, silent)
             finally:
                 self._refreshing = False
@@ -337,6 +379,8 @@ class MainWindow(Gtk.Window):
             return "#27ae60", "Ligado (Livre)"    # Verde esmeralda vibrante
         elif pwr == "STANDBY":
             return "#f39c12", "Em Espera (Standby)"  # Âmbar / Laranja
+        elif pwr == "STARTING":
+            return "#3498db", "Iniciando... (Aguarde)"  # Azul vibrante (transição suave para WARMUP/ON)
         elif pwr == "WARMUP":
             return "#e67e22", "Aquecendo... (Aguarde)"  # Laranja escuro
         elif pwr == "COOLDOWN":
@@ -440,11 +484,15 @@ class MainWindow(Gtk.Window):
         if row is None:
             self.btn_connect.set_sensitive(False)
             self.btn_pwr.set_sensitive(False)
+            self.btn_edit.set_sensitive(False)
+            self.btn_remove.set_sensitive(False)
             self.selected_proj_index = -1
             return
         self.selected_proj_index = row.get_index()
         self.btn_connect.set_sensitive(True)
         self.btn_pwr.set_sensitive(True)
+        self.btn_edit.set_sensitive(True)
+        self.btn_remove.set_sensitive(True)
 
     def on_toggle_power(self, widget):
         if self.selected_proj_index < 0 or self.selected_proj_index >= len(self.projectors_data):
@@ -454,20 +502,37 @@ class MainWindow(Gtk.Window):
         curr_pwr = p.get("power")
         new_state = (curr_pwr != "ON")
         action_name = "ligar" if new_state else "desligar"
-        self.lbl_info.set_text(f"Enviando comando para {action_name} {p['name']}...")
         self.btn_pwr.set_sensitive(False)
+
+        if new_state:
+            self._transient_power_states[p["ip"]] = {
+                "state": "STARTING",
+                "expires": time.time() + 12.0
+            }
+            p["power"] = "STARTING"
+            self.lbl_info.set_text(f"Iniciando {p['name']}... Aguarde o aquecimento da lâmpada.")
+        else:
+            self._transient_power_states[p["ip"]] = {
+                "state": "COOLDOWN",
+                "expires": time.time() + 10.0
+            }
+            p["power"] = "COOLDOWN"
+            self.lbl_info.set_text(f"Desligando {p['name']}... Aguarde o resfriamento.")
+
+        # Atualiza a lista visual imediatamente
+        self.populate_projector_list(self.projectors_data, silent=True)
 
         def run_pwr():
             try:
                 if client.connect():
                     client.set_power(new_state)
                     client.close()
-                    # Aguarda 2s para o projetor registrar o novo estado (ex: WARMUP)
+                    # Aguarda 2s para o projetor registrar o novo estado
                     time.sleep(2.0)
             except Exception as e:
                 log.warning(f"Erro ao alterar energia: {e}")
             finally:
-                GLib.idle_add(self.refresh_projectors_async)
+                GLib.idle_add(self.refresh_projectors_async, True)
                 GLib.idle_add(lambda: self.btn_pwr.set_sensitive(True))
 
         threading.Thread(target=run_pwr, daemon=True).start()
@@ -671,6 +736,75 @@ class MainWindow(Gtk.Window):
                 add_or_update_projector(name, ip)
                 self.refresh_projectors_async()
         dialog.destroy()
+
+    def on_edit_projector_dialog(self, widget):
+        """Abre caixa de diálogo para editar o nome ou IP do projetor selecionado."""
+        if self.selected_proj_index < 0 or self.selected_proj_index >= len(self.projectors_data):
+            return
+        p = self.projectors_data[self.selected_proj_index]
+        orig_ip = p.get("ip", "")
+        orig_name = p.get("name", "")
+
+        dialog = Gtk.Dialog(
+            title="Editar Projetor",
+            transient_for=self,
+            flags=0,
+            buttons=(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL, Gtk.STOCK_OK, Gtk.ResponseType.OK)
+        )
+        box = dialog.get_content_area()
+        box.set_spacing(8)
+        box.set_margin_start(16)
+        box.set_margin_end(16)
+        box.set_margin_top(14)
+        box.set_margin_bottom(14)
+
+        lbl1 = Gtk.Label(label="Nome do Projetor:")
+        lbl1.set_halign(Gtk.Align.START)
+        box.add(lbl1)
+        entry_name = Gtk.Entry()
+        entry_name.set_text(orig_name)
+        box.add(entry_name)
+
+        lbl2 = Gtk.Label(label="Endereço IP:")
+        lbl2.set_halign(Gtk.Align.START)
+        box.add(lbl2)
+        entry_ip = Gtk.Entry()
+        entry_ip.set_text(orig_ip)
+        box.add(entry_ip)
+
+        dialog.show_all()
+        response = dialog.run()
+        if response == Gtk.ResponseType.OK:
+            new_name = entry_name.get_text().strip()
+            new_ip = entry_ip.get_text().strip()
+            if new_name and new_ip:
+                update_projector_details(orig_ip, new_name, new_ip)
+                self.lbl_info.set_text(f"Projetor atualizado: {new_name}")
+                self.refresh_projectors_async()
+        dialog.destroy()
+
+    def on_remove_projector_dialog(self, widget):
+        """Solicita confirmação e remove o projetor selecionado da lista."""
+        if self.selected_proj_index < 0 or self.selected_proj_index >= len(self.projectors_data):
+            return
+        p = self.projectors_data[self.selected_proj_index]
+        dialog = Gtk.MessageDialog(
+            transient_for=self,
+            flags=0,
+            message_type=Gtk.MessageType.QUESTION,
+            buttons=Gtk.ButtonsType.OK_CANCEL,
+            text="Remover Projetor"
+        )
+        dialog.format_secondary_text(
+            f"Deseja realmente remover '{p['name']}' ({p['ip']}) da lista de projetores?"
+        )
+        dialog.set_title("Confirmar Remoção")
+        response = dialog.run()
+        dialog.destroy()
+        if response == Gtk.ResponseType.OK:
+            remove_projector(p.get("ip", ""))
+            self.lbl_info.set_text(f"Projetor '{p['name']}' removido.")
+            self.refresh_projectors_async()
 
     def on_info_dialog(self, widget):
         """Exibe pop-up explicativo sobre a configuração fundamental de Comunicação no Standby."""

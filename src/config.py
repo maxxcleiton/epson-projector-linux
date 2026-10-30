@@ -74,3 +74,33 @@ def add_or_update_projector(name: str, ip: str, mac: str = "") -> dict:
     cfg["projectors"] = projs
     save_config(cfg)
     return new_p
+
+
+def update_projector_details(orig_ip: str, new_name: str, new_ip: str) -> bool:
+    """Atualiza o nome e/ou endereço IP de um projetor existente."""
+    cfg = load_config()
+    projs = cfg.get("projectors", [])
+    found = False
+    for p in projs:
+        if p.get("ip") == orig_ip:
+            p["name"] = new_name
+            p["ip"] = new_ip
+            p["custom_name"] = True
+            found = True
+            break
+    if found:
+        save_config(cfg)
+    return found
+
+
+def remove_projector(ip: str) -> bool:
+    """Remove um projetor da lista de configurações pelo IP."""
+    cfg = load_config()
+    projs = cfg.get("projectors", [])
+    initial_len = len(projs)
+    projs = [p for p in projs if p.get("ip") != ip]
+    if len(projs) < initial_len:
+        cfg["projectors"] = projs
+        save_config(cfg)
+        return True
+    return False
