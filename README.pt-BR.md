@@ -10,6 +10,10 @@
 
 Aplicativo nativo para Linux (Ubuntu, Debian, Pop!_OS, Linux Mint, Fedora) para controle, gerenciamento e espelhamento de tela sem fio/rede para projetores Epson, **sem necessidade de Wine, Java ou emuladores**.
 
+<p align="center">
+  <img src="assets/screenshot.png" alt="Interface do Epson Projeção Linux" width="460">
+</p>
+
 ---
 
 ## 🎯 Motivação

@@ -10,6 +10,10 @@
 
 Native Linux application (Ubuntu, Debian, Pop!_OS, Linux Mint, Fedora) for remote control, management, and wireless/network screen mirroring to Epson projectors — **no Wine, Java, or emulators required**.
 
+<p align="center">
+  <img src="assets/screenshot.png" alt="Epson Projector Linux Interface" width="460">
+</p>
+
 ---
 
 ## 🎯 Motivation
