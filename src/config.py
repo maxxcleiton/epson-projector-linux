@@ -9,6 +9,7 @@ from pathlib import Path
 
 CONFIG_DIR = Path.home() / ".config" / "epson-projector"
 CONFIG_FILE = CONFIG_DIR / "projectors.json"
+LOG_FILE = CONFIG_DIR / "epson-projector.log"
 
 DEFAULT_PROJECTORS = [
     {

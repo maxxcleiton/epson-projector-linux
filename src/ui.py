@@ -22,6 +22,7 @@ from .config import (
     remove_projector,
     load_config,
     save_config,
+    LOG_FILE,
 )
 from .discovery import update_all_projector_statuses, scan_network_for_projectors
 from .capture import ScreenCapturer
@@ -824,7 +825,9 @@ class MainWindow(Gtk.Window):
             "  2. Acesse <b>Modo de Espera</b> (ou <i>Operação > Modo de Espera</i>)\n"
             "  3. Ative a opção: <b>Comunic. Activada</b> (ou <i>Communication On</i>)\n\n"
             "⚠️ <i>Se estiver desativada (Modo Eco), o projetor desliga a placa de rede ao apagar a lâmpada, "
-            "ficando invisível e impossibilitando o computador de ligá-lo remotamente.</i>"
+            "ficando invisível e impossibilitando o computador de ligá-lo remotamente.</i>\n\n"
+            "📄 <b>Arquivo de Log da Aplicação:</b>\n"
+            f"<code>{LOG_FILE}</code>"
         )
         dialog.run()
         dialog.destroy()

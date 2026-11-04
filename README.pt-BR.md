@@ -175,6 +175,9 @@ Você pode adicionar projetores tanto pela interface gráfica (clicando no botã
 
 ## 📜 Histórico de Versões (Changelog)
 
+### **v1.3.7**
+- **Geração Automática de Logs de Execução**: O aplicativo agora grava automaticamente os logs de diagnóstico em `~/.config/epson-projector/epson-projector.log` utilizando um gerenciador rotativo de arquivos (máximo de 2 MB por arquivo, com até 3 arquivos de histórico). Exceções não tratadas, handshakes e eventos de sessão ficam salvos para facilitar o diagnóstico de qualquer problema.
+
 ### **v1.3.6**
 - **Status Transitório "Iniciando... (Aguarde)"**: Ao ligar o projetor pelo aplicativo, a interface exibe imediatamente o status "Iniciando..." com indicador azul vibrante. Isso evita que o reinício temporário da placa de rede interna do projetor durante a ignição da lâmpada mostre falsamente "Desconectado" antes do aquecimento.
 - **Edição e Remoção de Projetores**: Adicionado botão de edição (e atalho por duplo-clique na lista) para alterar o nome e IP dos projetores cadastrados diretamente pela interface gráfica, além de botão para exclusão de projetores obsoletos.

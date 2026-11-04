@@ -178,6 +178,9 @@ You can add projectors through the graphical interface (`+ Adicionar`) or by edi
 
 ## 📜 Version History (Changelog)
 
+### **v1.3.7**
+- **Native Execution Logging**: The application now automatically records diagnostic logs to `~/.config/epson-projector/epson-projector.log` with a rotating file handler (2MB max, 3 archive backups). Uncaught exceptions, network handshakes, and projection lifecycle events are saved for easy troubleshooting.
+
 ### **v1.3.6**
 - **Seamless "Starting Up..." Power Transition**: When powering on a projector from Standby, the interface immediately reports "Starting Up... (Please wait)" with a vibrant status indicator, preventing the transient hardware network reboot from momentarily flashing a false "Disconnected" error before lamp warmup.
 - **Projector Profile Editing & Removal**: Added an Edit Projector button (and double-click shortcut on the list) allowing users to rename projectors or update IP addresses on the fly, as well as a Remove button to delete obsolete projectors from the configuration.
