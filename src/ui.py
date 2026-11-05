@@ -344,10 +344,25 @@ class MainWindow(Gtk.Window):
         GLib.timeout_add_seconds(3, self.auto_refresh_tick)
 
     def auto_refresh_tick(self) -> bool:
-        """Chamado a cada 3s para atualizar o status dos projetores em tempo real sem sobrecarregar a rede."""
+        """Chamado a cada 3s para atualizar o status dos projetores em tempo real sem sobrecarregar a rede.
+        Se algum projetor estiver em boot (STARTING), agenda um tick extra em 1s para detectar
+        o momento exato em que o módulo Wi-Fi sobe na rede."""
         if self.is_visible() and not self.session and not self._refreshing:
             self.refresh_projectors_async(silent=True)
+        # Polling acelerado durante boot: 1s em vez de 3s
+        has_starting = any(
+            t.get("state") == "STARTING" and time.time() < t.get("expires", 0)
+            for t in self._transient_power_states.values()
+        )
+        if has_starting:
+            GLib.timeout_add_seconds(1, self._fast_tick_once)
         return True
+
+    def _fast_tick_once(self) -> bool:
+        """Tick rápido de 1 ciclo para polling agressivo durante boot do projetor. Não se repete (retorna False)."""
+        if self.is_visible() and not self.session and not self._refreshing:
+            self.refresh_projectors_async(silent=True)
+        return False
 
     def _apply_status_stabilization(self, projectors: list) -> list:
         """
@@ -388,55 +403,73 @@ class MainWindow(Gtk.Window):
             #      BUSY → qualquer outro:  3 leituras consecutivas (falso "Livre" é o pior caso)
             #      qualquer → OFFLINE:     3 leituras consecutivas (evita piscar "Desconectado")
             #      qualquer → outro:       2 leituras consecutivas (mudança real confirmada relativamente rápido)
-            tracker = self._status_tracker.setdefault(ip, {
-                "stable_power": probed_pwr,
-                "pending_power": probed_pwr,
-                "pending_streak": 1,
-            })
 
-            stable_pwr = tracker["stable_power"]
-            curr_pwr = item.get("power")
+            # Se um transient (STARTING / COOLDOWN) está ativo, ele já controlou o item["power"].
+            # Nesse caso a histerese NÃO deve disputar — apenas sincroniza o tracker
+            # e deixa o transient ser a única fonte de verdade.
+            trans_active = ip in self._transient_power_states and now < self._transient_power_states[ip].get("expires", 0)
 
-            # Normaliza BUSY: se probed_busy mas curr_pwr != BUSY, força BUSY
-            if probed_busy and curr_pwr != "BUSY":
-                curr_pwr = "BUSY"
-                item["power"] = "BUSY"
-
-            if curr_pwr == stable_pwr:
-                # Leitura igual ao estado estável → reseta a contagem de mudança pendente
-                tracker["pending_power"] = curr_pwr
+            if trans_active:
+                # Mantém o tracker alinhado com o estado transitório para não criar divergência
+                forced_pwr = item.get("power")
+                tracker = self._status_tracker.setdefault(ip, {
+                    "stable_power": forced_pwr,
+                    "pending_power": forced_pwr,
+                    "pending_streak": 1,
+                })
+                tracker["stable_power"] = forced_pwr
+                tracker["pending_power"] = forced_pwr
                 tracker["pending_streak"] = 1
-                if stable_pwr == "BUSY":
-                    item["is_busy"] = True
             else:
-                # Leitura diferente → acumula streak de confirmação do candidato
-                if curr_pwr == tracker["pending_power"]:
-                    tracker["pending_streak"] += 1
-                else:
-                    # Candidato mudou: começa do zero (ainda mais conservador)
+                tracker = self._status_tracker.setdefault(ip, {
+                    "stable_power": probed_pwr,
+                    "pending_power": probed_pwr,
+                    "pending_streak": 1,
+                })
+
+                stable_pwr = tracker["stable_power"]
+                curr_pwr = item.get("power")
+
+                # Normaliza BUSY: se probed_busy mas curr_pwr != BUSY, força BUSY
+                if probed_busy and curr_pwr != "BUSY":
+                    curr_pwr = "BUSY"
+                    item["power"] = "BUSY"
+
+                if curr_pwr == stable_pwr:
+                    # Leitura igual ao estado estável → reseta a contagem de mudança pendente
                     tracker["pending_power"] = curr_pwr
                     tracker["pending_streak"] = 1
-
-                # Decide quantas confirmações são necessárias para aceitar essa mudança
-                if stable_pwr == "BUSY":
-                    threshold = 3   # Sair de Em Uso exige 3 leituras seguidas sem ser BUSY
-                elif curr_pwr == "OFFLINE":
-                    threshold = 3   # Ir para Desconectado exige 3 leituras seguidas OFFLINE
-                else:
-                    threshold = 2   # Demais transições exigem 2 leituras seguidas
-
-                if tracker["pending_streak"] >= threshold:
-                    # Confirmado: aceita a mudança de estado
-                    tracker["stable_power"] = curr_pwr
-                    tracker["pending_power"] = curr_pwr
-                    tracker["pending_streak"] = 1
-                else:
-                    # Ainda não confirmado: mantém o estado estável anterior visível na UI
-                    item["power"] = stable_pwr
                     if stable_pwr == "BUSY":
                         item["is_busy"] = True
-                    elif stable_pwr not in ("OFFLINE", None):
-                        item["online"] = True
+                else:
+                    # Leitura diferente → acumula streak de confirmação do candidato
+                    if curr_pwr == tracker["pending_power"]:
+                        tracker["pending_streak"] += 1
+                    else:
+                        # Candidato mudou: começa do zero (ainda mais conservador)
+                        tracker["pending_power"] = curr_pwr
+                        tracker["pending_streak"] = 1
+
+                    # Decide quantas confirmações são necessárias para aceitar essa mudança
+                    if stable_pwr == "BUSY":
+                        threshold = 3   # Sair de Em Uso exige 3 leituras seguidas sem ser BUSY
+                    elif curr_pwr == "OFFLINE":
+                        threshold = 3   # Ir para Desconectado exige 3 leituras seguidas OFFLINE
+                    else:
+                        threshold = 2   # Demais transições exigem 2 leituras seguidas
+
+                    if tracker["pending_streak"] >= threshold:
+                        # Confirmado: aceita a mudança de estado
+                        tracker["stable_power"] = curr_pwr
+                        tracker["pending_power"] = curr_pwr
+                        tracker["pending_streak"] = 1
+                    else:
+                        # Ainda não confirmado: mantém o estado estável anterior visível na UI
+                        item["power"] = stable_pwr
+                        if stable_pwr == "BUSY":
+                            item["is_busy"] = True
+                        elif stable_pwr not in ("OFFLINE", None):
+                            item["online"] = True
 
             stabilized.append(item)
 
@@ -539,9 +572,24 @@ class MainWindow(Gtk.Window):
             ctx_connect.add_class("suggested-action")
             self.btn_pwr.set_sensitive(False)
             self.btn_pwr.set_label("⚡ Ligar / Desligar")
-            self.lbl_info.set_markup(
-                f"⏳ <b>{p['name']}</b> está inicializando. Aguarde o aquecimento da lâmpada..."
-            )
+            # Calcula tempo decorrido para mostrar fase do boot
+            trans = self._transient_power_states.get(p.get("ip", ""), {})
+            started_at = trans.get("started_at")
+            if started_at:
+                elapsed = int(time.time() - started_at)
+                if elapsed < 20:
+                    phase = "Iniciando firmware principal..."
+                elif elapsed < 50:
+                    phase = "Módulo Wi-Fi conectando ao AP..."
+                else:
+                    phase = "Aguardando serviço EasyMP na rede..."
+                self.lbl_info.set_markup(
+                    f"⏳ <b>{p['name']}</b> inicializando ({elapsed}s)  <i>{phase}</i>"
+                )
+            else:
+                self.lbl_info.set_markup(
+                    f"⏳ <b>{p['name']}</b> está inicializando. Aguarde o aquecimento da lâmpada..."
+                )
         elif pwr == "COOLDOWN":
             self.btn_connect.set_sensitive(False)
             self.btn_connect.set_label("⏳ Esfriando...")
@@ -678,12 +726,16 @@ class MainWindow(Gtk.Window):
         self.btn_pwr.set_sensitive(False)
 
         if new_state:
+            # Boot do projetor após longo período desligado pode levar até 90 segundos:
+            # ~15s para o firmware principal (porta 3629) + até 75s para o módulo Wi-Fi
+            # ELPAP07/ELPAP10 subir, associar ao AP, obter DHCP e levantar o serviço EasyMP.
             self._transient_power_states[p["ip"]] = {
                 "state": "STARTING",
-                "expires": time.time() + 12.0
+                "expires": time.time() + 90.0,
+                "started_at": time.time(),
             }
             p["power"] = "STARTING"
-            self.lbl_info.set_text(f"Iniciando {p['name']}... Aguarde o aquecimento da lâmpada.")
+            self.lbl_info.set_text(f"Iniciando {p['name']}... O módulo Wi-Fi pode demorar até 90 segundos.")
         else:
             self._transient_power_states[p["ip"]] = {
                 "state": "COOLDOWN",
