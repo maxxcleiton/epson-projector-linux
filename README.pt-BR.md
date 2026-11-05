@@ -175,6 +175,11 @@ Você pode adicionar projetores tanto pela interface gráfica (clicando no botã
 
 ## 📜 Histórico de Versões (Changelog)
 
+### **v1.3.9.1**
+- **Histerese Robusta por Sequência de Confirmações (Pending Streak)**: O status só é alterado após N leituras consecutivas com o mesmo valor (3 para sair de "Em Uso", 3 para "Desconectado" e 2 para os demais estados), eliminando completamente oscilações por timeouts transitórios de TCP.
+- **Suporte a Boot Frio e Janela de Inicialização de 90s**: Janela de transição de energia expandida de 12s para 90s para acomodar o ciclo completo de boot do módulo Wi-Fi (ELPAP07/ELPAP10) após longos períodos desligado.
+- **Diagnóstico com Fases de Inicialização e Polling Rápido**: Feedback em tempo real exibindo a fase atual do boot (*firmware*, conexão com AP, subida do EasyMP) com verificação a cada 1 segundo enquanto inicializa.
+
 ### **v1.3.9**
 - **Pipeline de Transmissão Desacoplado Zero-Lag**: Desacoplamento do loop de captura de tela em relação ao envio de rede através de uma fila não bloqueante de 1 slot. Se ocorrer lentidão transitória na rede ou atraso de socket, os frames obsoletos são automaticamente descartados em favor do frame mais recente, eliminando completamente engasgos de buffer e atraso no cursor do mouse.
 - **Perfil Ultra Fluidez (25 FPS)**: Novo perfil de transmissão a 25 FPS otimizado para navegação rápida, movimentação fluida de planilhas e sites.

@@ -178,6 +178,11 @@ You can add projectors through the graphical interface (`+ Adicionar`) or by edi
 
 ## 📜 Version History (Changelog)
 
+### **v1.3.9.1**
+- **Streak-Based Status Hysteresis**: Replaced threshold hysteresis with strict N-consecutive identical readings model (3 streaks to leave "In Use", 3 for "Disconnected", 2 for all others), permanently preventing state oscillation caused by transient socket timeouts.
+- **Cold Boot & 90s Startup Window**: Extended power-on transition timeout from 12s to 90s to properly accommodate wireless module (ELPAP07/ELPAP10) boot cycles after prolonged power-off periods.
+- **Boot Phase Diagnostics & Fast Polling**: Dynamic phase awareness showing real-time progress (firmware boot, AP association, EasyMP service availability) with 1-second polling intervals during startup.
+
 ### **v1.3.9**
 - **Zero-Lag Decoupled Transmission Pipeline**: Decoupled the screen capture loop from network transmission using a non-blocking single-slot worker queue. If network congestion or packet delays occur, obsolete frames are automatically dropped in favor of the freshest frame, completely eliminating buffering stutter (engasgos) and cursor drag.
 - **Ultra Fluidez Profile (25 FPS)**: Introduced a high-performance 25 FPS profile tailored for smooth spreadsheet navigation, document editing, and web browsing.
