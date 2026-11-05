@@ -9,6 +9,7 @@ import socket
 import struct
 import time
 import threading
+import queue
 import logging
 from typing import Callable, Optional
 
@@ -337,8 +338,36 @@ class ProjectorSession:
         self.frames_sent = 0
         self.bytes_sent = 0
 
-        # Loop de entrega dos 4 quadrantes agrupados num único envio atômico
-        def send_tiles(tiles_data: list[tuple[int, int, int, int, bytes]]):
+        # Pipeline desacoplado de alta fluidez (Zero-Lag Worker Queue):
+        # A captura roda solta no FPS desejado (ex: 25 FPS).
+        # A thread de envio despacha os pacotes pela rede. Se a rede ou o projetor
+        # apresentarem qualquer micro-hesitação, a fila descarta frames defasados
+        # e envia imediatamente o mais recente, impedindo 100% dos engasgos e acúmulo de latência.
+        frame_queue = queue.Queue(maxsize=1)
+
+        def video_sender_worker():
+            while self._running:
+                try:
+                    pkt = frame_queue.get(timeout=0.2)
+                except queue.Empty:
+                    continue
+                if not self.active or not self.sock_video:
+                    break
+                try:
+                    self.sock_video.sendall(pkt)
+                    self.bytes_sent += len(pkt)
+                    self.frames_sent += 1
+                except Exception as e:
+                    log.error(f"Erro transmitindo frame para o projetor: {e}")
+                    if self._running:
+                        self._trigger_disconnect("Falha de transmissão no canal de vídeo.")
+                    break
+
+        t_sender = threading.Thread(target=video_sender_worker, daemon=True)
+        t_sender.start()
+        self._threads.append(t_sender)
+
+        def on_tiles_ready(tiles_data: list[tuple[int, int, int, int, bytes]]):
             if not self.active or not self.sock_video:
                 return
             try:
@@ -348,15 +377,20 @@ class ProjectorSession:
                     parts.append(desc + jdata)
                 payload = struct.pack(">I", len(tiles_data)) + b"".join(parts)
                 pkt = b"EPRD0600" + self.local_ip + b"\x00\x00\x00\x00" + struct.pack(">I", len(payload)) + payload
-                self.sock_video.sendall(pkt)
-                self.bytes_sent += len(pkt)
-                self.frames_sent += 1
-            except Exception as e:
-                log.error(f"Erro transmitindo frame para o projetor: {e}")
-                if self._running:
-                    self._trigger_disconnect("Falha de transmissão no canal de vídeo.")
 
-        self.capturer.start_streaming(send_tiles)
+                # Descarta frame defasado se o envio anterior ainda estiver ocupado
+                try:
+                    frame_queue.put_nowait(pkt)
+                except queue.Full:
+                    try:
+                        frame_queue.get_nowait()
+                    except queue.Empty:
+                        pass
+                    frame_queue.put_nowait(pkt)
+            except Exception as e:
+                log.debug(f"Aviso empacotando frame: {e}")
+
+        self.capturer.start_streaming(on_tiles_ready)
         update_status("Projetando com sucesso!")
         return True, "Sessão iniciada."
 

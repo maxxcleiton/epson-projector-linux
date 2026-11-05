@@ -4,7 +4,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-VERSION="1.3.8"
+VERSION="1.3.9"
 PKG_NAME="epson-projector-linux"
 BUILD_DIR="${SCRIPT_DIR}/build_pkg"
 

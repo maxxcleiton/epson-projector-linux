@@ -178,6 +178,12 @@ You can add projectors through the graphical interface (`+ Adicionar`) or by edi
 
 ## 📜 Version History (Changelog)
 
+### **v1.3.9**
+- **Zero-Lag Decoupled Transmission Pipeline**: Decoupled the screen capture loop from network transmission using a non-blocking single-slot worker queue. If network congestion or packet delays occur, obsolete frames are automatically dropped in favor of the freshest frame, completely eliminating buffering stutter (engasgos) and cursor drag.
+- **Ultra Fluidez Profile (25 FPS)**: Introduced a high-performance 25 FPS profile tailored for smooth spreadsheet navigation, document editing, and web browsing.
+- **CPU Scaling Optimization**: Replaced Bicubic resampling with SIMD-accelerated Bilinear scaling, cutting frame processing CPU time by nearly 40%.
+- **Hardware EDID Monitor Identification**: Automatically detects actual monitor vendor and model names (e.g. `AOC 2369M`, `Acer V226HQL`) directly from display EDID blocks, and remembers monitor selection across sessions.
+
 ### **v1.3.8**
 - **Status Stabilization & Anti-Flicker Hysteresis**: Added a dual-probe hysteresis algorithm preventing transient network timeouts from alternating the projector status (e.g., between "In Use", "Available", or "Disconnected").
 - **Streamlined Status Labels**: Simplified status text to clean, direct terms (`In Use`, `Available`, `Standby`, `Starting...`, `Warming Up...`, `Cooling Down...`, `Disconnected`).

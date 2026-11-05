@@ -57,9 +57,9 @@ CANVAS_W, CANVAS_H = 1024, 768
 HALF_W, HALF_H = 512, 384
 
 # Compatibilidade retroativa com Pillow antigo (< 9.1 / Ubuntu 22.04) e moderno (>= 9.1)
-# Utiliza filtro BICUBIC para garantir contornos nítidos e máxima legibilidade de textos
+# Utiliza filtro BILINEAR para alta performance de CPU mantendo excelente nitidez
 _resample_mod = getattr(Image, "Resampling", Image)
-RESAMPLE_FILTER = getattr(_resample_mod, "BICUBIC", 3)
+RESAMPLE_FILTER = getattr(_resample_mod, "BILINEAR", 2)
 
 # Ordem dos quadrantes com (0,0) POR ÚLTIMO (gatilho de renderização no hardware Epson)
 QUADRANTS = [
@@ -96,18 +96,61 @@ class ScreenCapturer:
         self._fallback_cursor_img: Optional[Image.Image] = None
 
     @staticmethod
+    def _detect_edid_models() -> dict:
+        """Lê os blocos EDID via xrandr para identificar os nomes e modelos reais dos monitores conectados (ex: AOC, Acer)."""
+        import subprocess, re
+        models = {}
+        try:
+            out = subprocess.check_output(["xrandr", "--verbose"], stderr=subprocess.DEVNULL).decode("ascii", errors="ignore")
+            matches = re.findall(r"([A-Za-z0-9_-]+)\s+connected.*?\n\s+EDID:\s*\n((?:\s+[0-9a-f]{32}\n)+)", out, re.DOTALL)
+            for port, edid_hex in matches:
+                raw = bytes.fromhex("".join(edid_hex.split()))
+                if len(raw) < 18:
+                    continue
+                # Código do fabricante (bytes 8 e 9 do EDID)
+                mfg_code = ((raw[8] & 0x7c) >> 2, ((raw[8] & 0x03) << 3) | ((raw[9] & 0xe0) >> 5), raw[9] & 0x1f)
+                mfg = "".join([chr(c + ord("A") - 1) for c in mfg_code if 1 <= c <= 26])
+                if mfg == "ACR":
+                    mfg = "Acer"
+
+                # Nome do Modelo (descritor 0x00 0x00 0x00 0xfc 0x00)
+                idx = raw.find(b"\x00\x00\x00\xfc\x00")
+                model_str = ""
+                if idx != -1:
+                    model_str = raw[idx+5:idx+18].decode("ascii", errors="ignore").strip()
+
+                if mfg and model_str:
+                    full_name = model_str if model_str.startswith(mfg) else f"{mfg} {model_str}"
+                else:
+                    full_name = model_str or mfg
+
+                if full_name:
+                    models[port] = full_name
+        except Exception:
+            pass
+        return models
+
+    @staticmethod
     def get_monitors() -> list[dict]:
-        """Retorna lista de monitores conectados no sistema com coordenadas e nomes."""
+        """Retorna lista de monitores conectados no sistema com coordenadas e nomes reais de fabricante/modelo."""
         display = Gdk.Display.get_default()
         if not display:
             return [{"index": 0, "name": "Tela Principal (1920x1080)", "x": 0, "y": 0, "width": 1920, "height": 1080, "is_primary": True}]
 
+        edid_models = ScreenCapturer._detect_edid_models()
         n = display.get_n_monitors()
         monitors = []
         for i in range(n):
             mon = display.get_monitor(i)
             geom = mon.get_geometry()
-            name = mon.get_model() or f"Monitor {i+1}"
+            port_key = f"DisplayPort-{i+1}"
+            model = edid_models.get(port_key, "")
+            if not model:
+                for p_name, m_name in edid_models.items():
+                    if m_name and p_name not in [x.get("port") for x in monitors]:
+                        model = m_name
+                        break
+            name = model or mon.get_model() or f"Monitor {i+1}"
             is_prim = mon.is_primary()
             suffix = " (Principal)" if is_prim else ""
             monitors.append({

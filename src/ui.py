@@ -275,30 +275,45 @@ class MainWindow(Gtk.Window):
         self.combo_monitors = Gtk.ComboBoxText()
         monitors = ScreenCapturer.get_monitors()
         active_idx = 0
+        cfg = load_config()
+        saved_mon_idx = cfg.get("last_monitor_index")
+
         for i, m in enumerate(monitors):
             self.combo_monitors.append_text(m["name"])
-            if m.get("is_primary"):
+            # Prioridade de seleção automática:
+            # 1. Índice salvo na configuração
+            # 2. Monitor AOC identificado no nome
+            # 3. Monitor primário
+            if saved_mon_idx is not None and i == saved_mon_idx:
                 active_idx = i
+            elif saved_mon_idx is None and "AOC" in m.get("name", ""):
+                active_idx = i
+            elif saved_mon_idx is None and active_idx == 0 and m.get("is_primary"):
+                active_idx = i
+
         if monitors:
             self.combo_monitors.set_active(active_idx)
+        self.combo_monitors.connect("changed", self._on_monitor_changed)
         hbox_monitor.pack_start(self.combo_monitors, True, True, 0)
 
-        # Seletor de Qualidade de Imagem
+        # Seletor de Perfil e Qualidade de Transmissão
         hbox_res = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         main_vbox.pack_start(hbox_res, False, False, 0)
 
-        lbl_res = Gtk.Label(label="Qualidade de Imagem:")
+        lbl_res = Gtk.Label(label="Modo de Transmissão:")
         hbox_res.pack_start(lbl_res, False, False, 0)
 
         self.combo_resolutions = Gtk.ComboBoxText()
         self.res_options = [
-            ("high", "Alta Nitidez (Texto & Planilhas — Recomendado)"),
-            ("balanced", "Equilibrado (Padrão — JPEG 80)"),
-            ("low", "Modo Leve (Rede Wi-Fi Lenta — Fluidez Máxima)"),
+            ("smooth", "Ultra Fluidez (25 FPS — Navegação Rápida & Planilhas) ⭐"),
+            ("high", "Alta Nitidez (20 FPS — Texto Nítido — JPEG 90)"),
+            ("balanced", "Equilibrado (20 FPS — Padrão — JPEG 80)"),
+            ("low", "Modo Leve (15 FPS — Wi-Fi Lento — JPEG 70)"),
+            ("ultralow", "Ultra Leve (10 FPS — Máxima Economia — JPEG 60)"),
         ]
         for key, label in self.res_options:
             self.combo_resolutions.append_text(label)
-        self.combo_resolutions.set_active(0)  # Padrão: Alta Nitidez
+        self.combo_resolutions.set_active(0)  # Padrão: Ultra Fluidez 25 FPS
         hbox_res.pack_start(self.combo_resolutions, True, True, 0)
 
         # Barra de status informativa
@@ -624,6 +639,13 @@ class MainWindow(Gtk.Window):
             self.listbox.select_row(self.listbox.get_row_at_index(target_row_idx))
         self._update_selected_projector_ui()
 
+    def _on_monitor_changed(self, combo):
+        idx = combo.get_active()
+        if idx >= 0:
+            cfg = load_config()
+            cfg["last_monitor_index"] = idx
+            save_config(cfg)
+
     def on_row_selected(self, listbox, row):
         if row is None:
             self.selected_proj_index = -1
@@ -714,13 +736,19 @@ class MainWindow(Gtk.Window):
             res_idx = 0
         profile_key = self.res_options[res_idx][0]
 
-        if profile_key == "high":
+        if profile_key == "smooth":
+            quality_val = 80
+            fps_val = 25
+        elif profile_key == "high":
             quality_val = 90
             fps_val = 20
         elif profile_key == "low":
             quality_val = 70
             fps_val = 15
-        else:
+        elif profile_key == "ultralow":
+            quality_val = 60
+            fps_val = 10
+        else:  # balanced
             quality_val = 80
             fps_val = 20
 

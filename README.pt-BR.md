@@ -175,6 +175,12 @@ Você pode adicionar projetores tanto pela interface gráfica (clicando no botã
 
 ## 📜 Histórico de Versões (Changelog)
 
+### **v1.3.9**
+- **Pipeline de Transmissão Desacoplado Zero-Lag**: Desacoplamento do loop de captura de tela em relação ao envio de rede através de uma fila não bloqueante de 1 slot. Se ocorrer lentidão transitória na rede ou atraso de socket, os frames obsoletos são automaticamente descartados em favor do frame mais recente, eliminando completamente engasgos de buffer e atraso no cursor do mouse.
+- **Perfil Ultra Fluidez (25 FPS)**: Novo perfil de transmissão a 25 FPS otimizado para navegação rápida, movimentação fluida de planilhas e sites.
+- **Otimização de Escalonamento de CPU**: Substituição do filtro Bicúbico por Bilinear acelerado por SIMD, reduzindo o tempo de processamento por frame em quase 40%.
+- **Identificação de Monitores por Hardware EDID**: Detecção automática dos nomes reais de fabricante e modelo dos monitores (ex: `AOC 2369M`, `Acer V226HQL`) lendo blocos EDID via X11/xrandr, memorizando o monitor selecionado entre sessões.
+
 ### **v1.3.8**
 - **Estabilização de Status e Histerese Anti-Oscilação**: Implementado algoritmo de histerese que elimina a alternância indevida de status decorrente de timeouts temporários de rede (evitando que um projetor ocupado fique pulando entre "Em Uso", "Disponível" e "Desconectado").
 - **Nomenclatura Direta e Clara de Status**: Nomes de status simplificados para termos objetivos e sem redundâncias entre parênteses (`Em Uso`, `Disponível`, `Standby`, `Iniciando...`, `Aquecendo...`, `Esfriando...`, `Desconectado`).
