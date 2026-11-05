@@ -380,49 +380,63 @@ class MainWindow(Gtk.Window):
                 else:
                     self._transient_power_states.pop(ip, None)
 
-            # 2. Histerese e debounce de estado (impede alternância súbita de nomes de status)
+            # 2. Histerese por contagem de confirmações consecutivas.
+            #    Uma mudança de estado só é aceita depois de N leituras CONSECUTIVAS com o mesmo valor.
+            #    Isso elimina oscilação por timeout transitório de TCP ou variação do projetor.
+            #
+            #    Thresholds de confirmação:
+            #      BUSY → qualquer outro:  3 leituras consecutivas (falso "Livre" é o pior caso)
+            #      qualquer → OFFLINE:     3 leituras consecutivas (evita piscar "Desconectado")
+            #      qualquer → outro:       2 leituras consecutivas (mudança real confirmada relativamente rápido)
             tracker = self._status_tracker.setdefault(ip, {
-                "stable_power": item.get("power"),
-                "non_busy_streak": 0,
-                "fail_streak": 0,
+                "stable_power": probed_pwr,
+                "pending_power": probed_pwr,
+                "pending_streak": 1,
             })
 
             stable_pwr = tracker["stable_power"]
             curr_pwr = item.get("power")
 
-            # Caso 1: Estava EM USO (BUSY)
-            if stable_pwr == "BUSY":
-                if curr_pwr == "BUSY" or probed_busy:
-                    tracker["non_busy_streak"] = 0
-                    item["power"] = "BUSY"
+            # Normaliza BUSY: se probed_busy mas curr_pwr != BUSY, força BUSY
+            if probed_busy and curr_pwr != "BUSY":
+                curr_pwr = "BUSY"
+                item["power"] = "BUSY"
+
+            if curr_pwr == stable_pwr:
+                # Leitura igual ao estado estável → reseta a contagem de mudança pendente
+                tracker["pending_power"] = curr_pwr
+                tracker["pending_streak"] = 1
+                if stable_pwr == "BUSY":
                     item["is_busy"] = True
-                else:
-                    # Falhou ou reportou Livre: exige 2 confirmações consecutivas antes de sair de EM USO
-                    tracker["non_busy_streak"] += 1
-                    if tracker["non_busy_streak"] < 2:
-                        # Mantém estável em BUSY para evitar piscar "Disponível / Desconectado"
-                        item["power"] = "BUSY"
-                        item["is_busy"] = True
-                    else:
-                        tracker["stable_power"] = curr_pwr
-                        tracker["non_busy_streak"] = 0
-
-            # Caso 2: Estava ONLINE (ON, STANDBY, etc.) e agora veio OFFLINE
-            elif stable_pwr not in ("OFFLINE", None) and curr_pwr == "OFFLINE":
-                tracker["fail_streak"] += 1
-                if tracker["fail_streak"] < 2:
-                    # Mantém o status estável anterior (suprime perda de pacote transitória)
-                    item["power"] = stable_pwr
-                    item["online"] = True
-                else:
-                    tracker["stable_power"] = "OFFLINE"
-                    tracker["fail_streak"] = 0
-
-            # Caso 3: Transição normal confirmada
             else:
-                tracker["fail_streak"] = 0
-                tracker["non_busy_streak"] = 0
-                tracker["stable_power"] = curr_pwr
+                # Leitura diferente → acumula streak de confirmação do candidato
+                if curr_pwr == tracker["pending_power"]:
+                    tracker["pending_streak"] += 1
+                else:
+                    # Candidato mudou: começa do zero (ainda mais conservador)
+                    tracker["pending_power"] = curr_pwr
+                    tracker["pending_streak"] = 1
+
+                # Decide quantas confirmações são necessárias para aceitar essa mudança
+                if stable_pwr == "BUSY":
+                    threshold = 3   # Sair de Em Uso exige 3 leituras seguidas sem ser BUSY
+                elif curr_pwr == "OFFLINE":
+                    threshold = 3   # Ir para Desconectado exige 3 leituras seguidas OFFLINE
+                else:
+                    threshold = 2   # Demais transições exigem 2 leituras seguidas
+
+                if tracker["pending_streak"] >= threshold:
+                    # Confirmado: aceita a mudança de estado
+                    tracker["stable_power"] = curr_pwr
+                    tracker["pending_power"] = curr_pwr
+                    tracker["pending_streak"] = 1
+                else:
+                    # Ainda não confirmado: mantém o estado estável anterior visível na UI
+                    item["power"] = stable_pwr
+                    if stable_pwr == "BUSY":
+                        item["is_busy"] = True
+                    elif stable_pwr not in ("OFFLINE", None):
+                        item["online"] = True
 
             stabilized.append(item)
 
