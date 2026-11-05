@@ -13,7 +13,7 @@ from .escvp import EscvpClient
 log = logging.getLogger(__name__)
 
 
-def check_is_busy_eemp(ip: str, timeout: float = 0.5) -> bool:
+def check_is_busy_eemp(ip: str, timeout: float = 1.2) -> bool:
     """
     Consulta o status de sessão nativo EEMP na porta TCP 3620.
     Envia pacote 0x0002 (Query Status).
@@ -29,7 +29,12 @@ def check_is_busy_eemp(ip: str, timeout: float = 0.5) -> bool:
         lip_bytes = socket.inet_aton(local_ip)
         pkt = b"EEMP0100" + lip_bytes + struct.pack("<II", 0x0002, 0)
         s.sendall(pkt)
-        resp = s.recv(512)
+        resp = b""
+        while len(resp) < 57:
+            chunk = s.recv(512)
+            if not chunk:
+                break
+            resp += chunk
         s.close()
         if len(resp) >= 57:
             return resp[56] == 0x02
@@ -41,7 +46,7 @@ def check_is_busy_eemp(ip: str, timeout: float = 0.5) -> bool:
 def check_projector_status(proj: dict) -> dict:
     """Verifica se o projetor está online, ligado, em standby, ou ocupado."""
     ip = proj["ip"]
-    client = EscvpClient(ip, timeout=0.8)
+    client = EscvpClient(ip, timeout=1.2)
     result = dict(proj)
     result["online"] = False
     result["power"] = "OFFLINE"
@@ -54,7 +59,7 @@ def check_projector_status(proj: dict) -> dict:
 
         # Se o projetor estiver LIGADO (ON): consulta via EEMP se há sessão ativa de outro usuário
         if power == "ON":
-            if check_is_busy_eemp(ip):
+            if check_is_busy_eemp(ip, timeout=1.2):
                 result["power"] = "BUSY"
                 result["is_busy"] = True
 
@@ -63,13 +68,18 @@ def check_projector_status(proj: dict) -> dict:
         # Se a porta 3629 não respondeu, testa se a porta EasyMP 3620 responde
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.settimeout(0.4)
+            s.settimeout(1.2)
             s.connect((ip, proj.get("port_easymp", 3620)))
             local_ip = s.getsockname()[0]
             lip_bytes = socket.inet_aton(local_ip)
             pkt = b"EEMP0100" + lip_bytes + struct.pack("<II", 0x0002, 0)
             s.sendall(pkt)
-            resp = s.recv(512)
+            resp = b""
+            while len(resp) < 57:
+                chunk = s.recv(512)
+                if not chunk:
+                    break
+                resp += chunk
             s.close()
             result["online"] = True
             if len(resp) >= 57 and resp[56] == 0x02:
@@ -85,7 +95,7 @@ def check_projector_status(proj: dict) -> dict:
 
 
 def update_all_projector_statuses(projectors: list) -> list:
-    """Atualiza o status de todos os projetores cadastrados em paralelo."""
+    """Atualiza o status de todos os projetores cadastrados em paralelo, preservando a ordem original da lista."""
     results = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
         future_map = {executor.submit(check_projector_status, p): p for p in projectors}
@@ -95,8 +105,9 @@ def update_all_projector_statuses(projectors: list) -> list:
                 results.append(res)
             except Exception as e:
                 log.error(f"Erro checando status de projetor: {e}")
-    # Ordena pelo nome para manter ordem estável
-    results.sort(key=lambda x: x.get("name", ""))
+    # Preserva rigorosamente a ordem da lista original para evitar troca de posições na interface
+    order_map = {p.get("ip"): idx for idx, p in enumerate(projectors)}
+    results.sort(key=lambda x: order_map.get(x.get("ip"), 999))
     return results
 
 

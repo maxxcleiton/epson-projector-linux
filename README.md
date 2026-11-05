@@ -178,6 +178,12 @@ You can add projectors through the graphical interface (`+ Adicionar`) or by edi
 
 ## 📜 Version History (Changelog)
 
+### **v1.3.8**
+- **Status Stabilization & Anti-Flicker Hysteresis**: Added a dual-probe hysteresis algorithm preventing transient network timeouts from alternating the projector status (e.g., between "In Use", "Available", or "Disconnected").
+- **Streamlined Status Labels**: Simplified status text to clean, direct terms (`In Use`, `Available`, `Standby`, `Starting...`, `Warming Up...`, `Cooling Down...`, `Disconnected`).
+- **Context-Aware Dynamic Actions**: The main button and guidance text now intelligently adapt to the selected projector's state (e.g., displaying `⚡ Take Over Projection` when a projector is already in use by another computer, and `▶ Power On & Project` when in Standby).
+- **Embedded Network Optimization**: Polling interval relaxed to 3 seconds with complete packet reception buffering on port 3620, eliminating socket contention on the projector's micro-controller.
+
 ### **v1.3.7**
 - **Native Execution Logging**: The application now automatically records diagnostic logs to `~/.config/epson-projector/epson-projector.log` with a rotating file handler (2MB max, 3 archive backups). Uncaught exceptions, network handshakes, and projection lifecycle events are saved for easy troubleshooting.
 

@@ -175,6 +175,7 @@ class MainWindow(Gtk.Window):
         self.selected_proj_index = -1
         self._refreshing = False
         self._transient_power_states = {}  # Guarda estados temporários para transição suave (STARTING / COOLDOWN)
+        self._status_tracker = {}  # Guarda histórico de status para histerese anti-flicker e anti-alternância
 
         # Aplica estilo CSS para garantir contraste perfeito e seleção elegante em tom grafite
         css_provider = Gtk.CssProvider()
@@ -324,17 +325,96 @@ class MainWindow(Gtk.Window):
 
         self.refresh_projectors_async()
 
-        # Atualização automática contínua em segundo plano a cada 1 segundo
-        GLib.timeout_add_seconds(1, self.auto_refresh_tick)
+        # Atualização automática contínua em segundo plano a cada 3 segundos
+        GLib.timeout_add_seconds(3, self.auto_refresh_tick)
 
     def auto_refresh_tick(self) -> bool:
-        """Chamado a cada 1s para atualizar o status dos projetores em tempo real."""
+        """Chamado a cada 3s para atualizar o status dos projetores em tempo real sem sobrecarregar a rede."""
         if self.is_visible() and not self.session and not self._refreshing:
             self.refresh_projectors_async(silent=True)
         return True
 
+    def _apply_status_stabilization(self, projectors: list) -> list:
+        """
+        Aplica suavização e histerese de status para evitar que instabilidades temporárias
+        de rede ou timeouts façam o status ficar alternando (ex: 'Em Uso' -> 'Disponível' -> 'Em Uso').
+        """
+        now = time.time()
+        stabilized = []
+
+        for p in projectors:
+            item = dict(p)
+            ip = item.get("ip")
+            probed_pwr = item.get("power", "OFFLINE")
+            probed_busy = item.get("is_busy", False)
+
+            # 1. Prioridade para transições de ligar/desligar acionadas pelo próprio usuário (STARTING / COOLDOWN)
+            trans = self._transient_power_states.get(ip)
+            if trans:
+                if now < trans["expires"]:
+                    if trans["state"] == "STARTING":
+                        if probed_pwr in ("WARMUP", "ON", "BUSY"):
+                            self._transient_power_states.pop(ip, None)
+                        else:
+                            item["power"] = "STARTING"
+                    elif trans["state"] == "COOLDOWN":
+                        if probed_pwr in ("STANDBY", "OFFLINE"):
+                            self._transient_power_states.pop(ip, None)
+                        else:
+                            item["power"] = "COOLDOWN"
+                else:
+                    self._transient_power_states.pop(ip, None)
+
+            # 2. Histerese e debounce de estado (impede alternância súbita de nomes de status)
+            tracker = self._status_tracker.setdefault(ip, {
+                "stable_power": item.get("power"),
+                "non_busy_streak": 0,
+                "fail_streak": 0,
+            })
+
+            stable_pwr = tracker["stable_power"]
+            curr_pwr = item.get("power")
+
+            # Caso 1: Estava EM USO (BUSY)
+            if stable_pwr == "BUSY":
+                if curr_pwr == "BUSY" or probed_busy:
+                    tracker["non_busy_streak"] = 0
+                    item["power"] = "BUSY"
+                    item["is_busy"] = True
+                else:
+                    # Falhou ou reportou Livre: exige 2 confirmações consecutivas antes de sair de EM USO
+                    tracker["non_busy_streak"] += 1
+                    if tracker["non_busy_streak"] < 2:
+                        # Mantém estável em BUSY para evitar piscar "Disponível / Desconectado"
+                        item["power"] = "BUSY"
+                        item["is_busy"] = True
+                    else:
+                        tracker["stable_power"] = curr_pwr
+                        tracker["non_busy_streak"] = 0
+
+            # Caso 2: Estava ONLINE (ON, STANDBY, etc.) e agora veio OFFLINE
+            elif stable_pwr not in ("OFFLINE", None) and curr_pwr == "OFFLINE":
+                tracker["fail_streak"] += 1
+                if tracker["fail_streak"] < 2:
+                    # Mantém o status estável anterior (suprime perda de pacote transitória)
+                    item["power"] = stable_pwr
+                    item["online"] = True
+                else:
+                    tracker["stable_power"] = "OFFLINE"
+                    tracker["fail_streak"] = 0
+
+            # Caso 3: Transição normal confirmada
+            else:
+                tracker["fail_streak"] = 0
+                tracker["non_busy_streak"] = 0
+                tracker["stable_power"] = curr_pwr
+
+            stabilized.append(item)
+
+        return stabilized
+
     def refresh_projectors_async(self, silent: bool = False):
-        """Atualiza a lista de projetores e status em segundo plano."""
+        """Atualiza a lista de projetores e status em segundo plano com estabilização."""
         if self._refreshing:
             return
         self._refreshing = True
@@ -345,26 +425,8 @@ class MainWindow(Gtk.Window):
             try:
                 raw_projs = get_projectors()
                 updated = update_all_projector_statuses(raw_projs)
-                now = time.time()
-                for item in updated:
-                    ip = item.get("ip")
-                    trans = self._transient_power_states.get(ip)
-                    if trans:
-                        if now < trans["expires"]:
-                            current_probed_pwr = item.get("power")
-                            if trans["state"] == "STARTING":
-                                if current_probed_pwr in ("WARMUP", "ON", "BUSY"):
-                                    self._transient_power_states.pop(ip, None)
-                                else:
-                                    item["power"] = "STARTING"
-                            elif trans["state"] == "COOLDOWN":
-                                if current_probed_pwr in ("STANDBY", "OFFLINE"):
-                                    self._transient_power_states.pop(ip, None)
-                                else:
-                                    item["power"] = "COOLDOWN"
-                        else:
-                            self._transient_power_states.pop(ip, None)
-                GLib.idle_add(self.populate_projector_list, updated, silent)
+                stabilized = self._apply_status_stabilization(updated)
+                GLib.idle_add(self.populate_projector_list, stabilized, silent)
             finally:
                 self._refreshing = False
 
@@ -372,22 +434,105 @@ class MainWindow(Gtk.Window):
 
     @staticmethod
     def _get_status_visuals(p: dict) -> tuple[str, str]:
-        """Retorna a cor (hex) e a descrição textual do status do projetor."""
+        """Retorna a cor (hex) e a descrição direta e clara do status do projetor."""
         pwr = p.get("power", "OFFLINE")
         if pwr in ("BUSY", "ACTIVE_EASYMP") or p.get("is_busy"):
-            return "#9b59b6", "Em Uso (Ocupado)"  # Roxo / Púrpura vibrante (alto contraste, não confunde com azul nem cinza)
+            return "#9b59b6", "Em Uso"           # Roxo / Púrpura vibrante
         elif pwr == "ON":
-            return "#27ae60", "Ligado (Livre)"    # Verde esmeralda vibrante
+            return "#27ae60", "Disponível"       # Verde esmeralda vibrante
         elif pwr == "STANDBY":
-            return "#f39c12", "Em Espera (Standby)"  # Âmbar / Laranja
+            return "#f39c12", "Standby"          # Âmbar / Laranja
         elif pwr == "STARTING":
-            return "#3498db", "Iniciando... (Aguarde)"  # Azul vibrante (transição suave para WARMUP/ON)
+            return "#3498db", "Iniciando..."     # Azul vibrante
         elif pwr == "WARMUP":
-            return "#e67e22", "Aquecendo... (Aguarde)"  # Laranja escuro
+            return "#e67e22", "Aquecendo..."     # Laranja escuro
         elif pwr == "COOLDOWN":
-            return "#95a5a6", "Esfriando... (Aguarde)"  # Cinza claro
+            return "#95a5a6", "Esfriando..."     # Cinza claro
         else:
-            return "#e74c3c", "Desconectado"       # Vermelho
+            return "#e74c3c", "Desconectado"     # Vermelho
+
+    def _update_selected_projector_ui(self):
+        """Atualiza os botões de ação e texto informativo de acordo com o projetor atualmente selecionado."""
+        if self.selected_proj_index < 0 or self.selected_proj_index >= len(self.projectors_data):
+            self.btn_connect.set_sensitive(False)
+            self.btn_connect.set_label("▶ Conectar e Projetar")
+            self.btn_pwr.set_sensitive(False)
+            self.btn_pwr.set_label("⚡ Ligar / Desligar")
+            self.btn_edit.set_sensitive(False)
+            self.btn_remove.set_sensitive(False)
+            self.lbl_info.set_text("Selecione um projetor para conectar.")
+            return
+
+        p = self.projectors_data[self.selected_proj_index]
+        pwr = p.get("power", "OFFLINE")
+        is_busy = (pwr == "BUSY" or p.get("is_busy"))
+
+        self.btn_edit.set_sensitive(True)
+        self.btn_remove.set_sensitive(True)
+
+        ctx_connect = self.btn_connect.get_style_context()
+
+        if is_busy:
+            self.btn_connect.set_sensitive(True)
+            self.btn_connect.set_label("⚡ Assumir Projeção")
+            ctx_connect.remove_class("suggested-action")
+            ctx_connect.add_class("destructive-action")
+            self.btn_pwr.set_sensitive(True)
+            self.btn_pwr.set_label("⚡ Desligar")
+            self.lbl_info.set_markup(
+                f"⚠️ <b>{p['name']}</b> está <b>Em Uso</b> por outro computador. "
+                "Clique em <i>'Assumir Projeção'</i> para transmitir."
+            )
+        elif pwr == "ON":
+            self.btn_connect.set_sensitive(True)
+            self.btn_connect.set_label("▶ Conectar e Projetar")
+            ctx_connect.remove_class("destructive-action")
+            ctx_connect.add_class("suggested-action")
+            self.btn_pwr.set_sensitive(True)
+            self.btn_pwr.set_label("⚡ Desligar")
+            self.lbl_info.set_markup(
+                f"<b>{p['name']}</b> está <b>Disponível</b>. Pronto para espelhar a tela."
+            )
+        elif pwr == "STANDBY":
+            self.btn_connect.set_sensitive(True)
+            self.btn_connect.set_label("▶ Ligar e Projetar")
+            ctx_connect.remove_class("destructive-action")
+            ctx_connect.add_class("suggested-action")
+            self.btn_pwr.set_sensitive(True)
+            self.btn_pwr.set_label("⚡ Ligar")
+            self.lbl_info.set_markup(
+                f"<b>{p['name']}</b> em <b>Standby</b>. O sistema ligará o aparelho automaticamente."
+            )
+        elif pwr in ("STARTING", "WARMUP"):
+            self.btn_connect.set_sensitive(False)
+            self.btn_connect.set_label("⏳ Aguardando...")
+            ctx_connect.remove_class("destructive-action")
+            ctx_connect.add_class("suggested-action")
+            self.btn_pwr.set_sensitive(False)
+            self.btn_pwr.set_label("⚡ Ligar / Desligar")
+            self.lbl_info.set_markup(
+                f"⏳ <b>{p['name']}</b> está inicializando. Aguarde o aquecimento da lâmpada..."
+            )
+        elif pwr == "COOLDOWN":
+            self.btn_connect.set_sensitive(False)
+            self.btn_connect.set_label("⏳ Esfriando...")
+            ctx_connect.remove_class("destructive-action")
+            ctx_connect.add_class("suggested-action")
+            self.btn_pwr.set_sensitive(False)
+            self.btn_pwr.set_label("⚡ Ligar / Desligar")
+            self.lbl_info.set_markup(
+                f"⏳ <b>{p['name']}</b> está resfriando a lâmpada. Aguarde finalizar."
+            )
+        else:  # OFFLINE
+            self.btn_connect.set_sensitive(False)
+            self.btn_connect.set_label("▶ Conectar e Projetar")
+            ctx_connect.remove_class("destructive-action")
+            ctx_connect.add_class("suggested-action")
+            self.btn_pwr.set_sensitive(False)
+            self.btn_pwr.set_label("⚡ Ligar / Desligar")
+            self.lbl_info.set_markup(
+                f"🔴 <b>{p['name']}</b> não respondeu na rede. Verifique a tomada ou cabo/Wi-Fi."
+            )
 
     def populate_projector_list(self, projectors: list, silent: bool = False):
         existing_rows = self.listbox.get_children()
@@ -414,8 +559,7 @@ class MainWindow(Gtk.Window):
                     row._last_sub = sub_markup
 
             self.projectors_data = projectors
-            if not silent:
-                self.lbl_info.set_text("Pronto. Selecione o projetor e clique em Conectar.")
+            self._update_selected_projector_ui()
             return
 
         # 2. RECONSTRUÇÃO: Quando projetores são adicionados ou removidos da lista
@@ -478,22 +622,14 @@ class MainWindow(Gtk.Window):
         self.listbox.show_all()
         if projectors:
             self.listbox.select_row(self.listbox.get_row_at_index(target_row_idx))
-        if not silent:
-            self.lbl_info.set_text("Pronto. Selecione o projetor e clique em Conectar.")
+        self._update_selected_projector_ui()
 
     def on_row_selected(self, listbox, row):
         if row is None:
-            self.btn_connect.set_sensitive(False)
-            self.btn_pwr.set_sensitive(False)
-            self.btn_edit.set_sensitive(False)
-            self.btn_remove.set_sensitive(False)
             self.selected_proj_index = -1
-            return
-        self.selected_proj_index = row.get_index()
-        self.btn_connect.set_sensitive(True)
-        self.btn_pwr.set_sensitive(True)
-        self.btn_edit.set_sensitive(True)
-        self.btn_remove.set_sensitive(True)
+        else:
+            self.selected_proj_index = row.get_index()
+        self._update_selected_projector_ui()
 
     def on_toggle_power(self, widget):
         if self.selected_proj_index < 0 or self.selected_proj_index >= len(self.projectors_data):
@@ -501,8 +637,8 @@ class MainWindow(Gtk.Window):
         p = self.projectors_data[self.selected_proj_index]
         client = ProjectorSession(p["ip"], p["name"]).escvp
         curr_pwr = p.get("power")
-        new_state = (curr_pwr != "ON")
-        action_name = "ligar" if new_state else "desligar"
+        is_currently_on = (curr_pwr in ("ON", "BUSY", "WARMUP"))
+        new_state = not is_currently_on
         self.btn_pwr.set_sensitive(False)
 
         if new_state:

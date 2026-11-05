@@ -175,6 +175,12 @@ Você pode adicionar projetores tanto pela interface gráfica (clicando no botã
 
 ## 📜 Histórico de Versões (Changelog)
 
+### **v1.3.8**
+- **Estabilização de Status e Histerese Anti-Oscilação**: Implementado algoritmo de histerese que elimina a alternância indevida de status decorrente de timeouts temporários de rede (evitando que um projetor ocupado fique pulando entre "Em Uso", "Disponível" e "Desconectado").
+- **Nomenclatura Direta e Clara de Status**: Nomes de status simplificados para termos objetivos e sem redundâncias entre parênteses (`Em Uso`, `Disponível`, `Standby`, `Iniciando...`, `Aquecendo...`, `Esfriando...`, `Desconectado`).
+- **Ações e Mensagens Dinâmicas por Contexto**: O botão principal e a mensagem informativa adaptam-se dinamicamente ao projetor selecionado (exibindo `⚡ Assumir Projeção` com destaque quando ocupado, e `▶ Ligar e Projetar` em Standby).
+- **Otimização de Tráfego para Hardware Embarcado**: Intervalo de monitoramento ajustado para 3 segundos com buffer completo de recepção na porta 3620, impedindo sobrecarga de sockets e quedas no processador do projetor.
+
 ### **v1.3.7**
 - **Geração Automática de Logs de Execução**: O aplicativo agora grava automaticamente os logs de diagnóstico em `~/.config/epson-projector/epson-projector.log` utilizando um gerenciador rotativo de arquivos (máximo de 2 MB por arquivo, com até 3 arquivos de histórico). Exceções não tratadas, handshakes e eventos de sessão ficam salvos para facilitar o diagnóstico de qualquer problema.
 
